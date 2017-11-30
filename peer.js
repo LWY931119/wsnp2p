@@ -8,7 +8,7 @@ var hashport = require('hash-to-port')
 var JSZip = require('jszip');
 var ADMZip = require('adm-zip')
 var fs = require("fs");
-var test = 1
+
 var myname = process.argv[2]
 var me = toAddress(myname)
 var peersname = new Array();
@@ -41,7 +41,7 @@ socket.on('end',function(){
 	conn.on('connection',function(socket,peer){
 		console.log('info > new connection from',peer);
 		connpeer.push(peer+"");
-		test++;
+
 		socket = jsonStream(socket);
 		set.add(socket);
 		socket.on('data',function(data){
@@ -53,6 +53,11 @@ socket.on('end',function(){
 							break;
 						case 'GET':
 							GETreceive(data);
+							break;
+						case 'ACK':
+							otherseqs.set(data.id,data.seq)
+							forwarding(data.id,data.seq,data.method,data.username,data.message);
+							console.log(data.name+" : "+data.message);
 							break;
 						default:
 							console.log(data);
@@ -67,9 +72,7 @@ process.stdin.on('data',function(data){
 	//TODO如果是短连接这里怎么forEach
 	var message = data.toString().trim();
 	var arr = message.split(/\s+/);
-	// for(var k=0;k <arr.length;k++){
-	// 	console.log(arr[k]);
-	// }
+	
 	if(arr.length != 2) printUsage();
 	if(arr.length == 2){
 		switch (arr[0]){
@@ -99,9 +102,8 @@ function POSTsend(filePath){
 		
 		//var mess = data;
 			console.log(data);
-			set.forEach(function (socket){
-				socket.write({id:myid,seq:myseq,method:"POST",username:myname,message:data})
-			})
+			forwarding(myid,myseq,"POST",myname,data);
+			
 			myseq++;
 		})
 		
@@ -111,9 +113,8 @@ function POSTsend(filePath){
 function POSTreceive(data){
 	tarZip(data.message)
 	otherseqs.set(data.id,data.seq)
-	set.forEach(function (socket){
-		socket.write({id:data.id,seq:data.seq,method:data.method,username:data.username,message:data.message});
-	})
+	forwarding(data.id,data.seq,data.method,data.username,data.message)
+	
 	console.log(data.username + ' > ' + data.message)
 	//execshell(data.message);
 }
@@ -124,40 +125,16 @@ function POSTreceive(data){
 function GETsend(message){
 	console.log(myname,message);
 	GETcheck(message);
-	set.forEach(function (socket){
-		socket.write({id:myid,seq:myseq,method:"GET",username:myname,message:message})
-	})
+	forwarding(myid,myseq,"GET",myname,message);
 	myseq++;
 }
 
 function GETcheck(name,message){
 	if (message == hashport(myname)){
-		console.log(test+"I'm here "+name);
+		console.log("I'm here "+name);
 		if(name != myname){
-			console.log(connpeer);
-			//connect name.local
-			//send something is in my here
-			var addr = toAddress(name);
-			var aaa =connpeer.indexOf(addr);
-			//console.log(addr,connpeer.indexOf(addr),aaa);
-			if(aaa == -1 ){
-				console.log('I want to connect to '+name);
-				//conn.add(addr);
-				var p1 = new Promise(function(resolve, reject){
-					conn.add(addr)
-					resolve();
-				});
-				p1.then(function(){
-					console.log('ssss');
-					var socket1 = conn.peer(addr);
-					socket1.write({id:myid,seq:myseq,method:"ACK",username:myname,message:'I\'m here'})
-				});
-				
-			}else{
-				console.log('I want to talk to '+name);
-				var socket1 = jsonStream(conn.peer(toAddress(name)));
-				socket1.write({id:myid,seq:myseq,method:"ACK",username:myname,message:'I\'m here'});
-			}
+			//如果发起GET的不是我，而且我这里有结果
+			forwarding(myid,myseq,"ACK",myname,"I\'m here");
 			
 		}
 	}
@@ -166,13 +143,15 @@ function GETcheck(name,message){
 function GETreceive(data){
 	GETcheck(data.username,data.message);
 	otherseqs.set(data.id,data.seq)
-	set.forEach(function (socket){
-		socket.write({id:data.id,seq:data.seq,method:data.method,username:data.username,message:data.message});
-	})
+	forwarding(data.id,data.seq,data.method,data.username,data.message)	
 	console.log(data.username + ' find ' + data.message)
 }
 //TODO:如何在合适的时间通知server删除自己？
-
+function forwarding(id,seq,method,username,message){
+	set.forEach(function (socket){
+		socket.write({id:id,seq:seq,method:method,username:username,message:message});
+	})
+}
 process.on('exit',function(){
 	var socket = jsonStream(net.connect(10000, servername))
 	state = 'logoff'
